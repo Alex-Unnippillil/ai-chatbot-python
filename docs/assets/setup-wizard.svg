@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="610" viewBox="0 0 1200 610">
+  <rect width="1200" height="610" rx="26" fill="#0b1120"/>
+  <rect x="32" y="30" width="1136" height="550" rx="18" fill="#111827" stroke="#334155"/>
+
+  <circle cx="70" cy="67" r="8" fill="#f87171"/>
+  <circle cx="96" cy="67" r="8" fill="#fbbf24"/>
+  <circle cx="122" cy="67" r="8" fill="#34d399"/>
+
+  <g font-family="monospace">
+    <text x="70" y="132" fill="#22d3ee" font-size="22">────────────────────────────────────────────────────────────────────</text>
+    <text x="600" y="174" text-anchor="middle" fill="#f8fafc" font-size="25" font-weight="700">FIRST-TIME SETUP</text>
+    <text x="600" y="207" text-anchor="middle" fill="#94a3b8" font-size="18">Secure OpenRouter configuration</text>
+    <text x="70" y="244" fill="#22d3ee" font-size="22">────────────────────────────────────────────────────────────────────</text>
+
+    <text x="70" y="302" fill="#f8fafc" font-size="20">No OpenRouter API key is configured.</text>
+    <text x="70" y="348" fill="#94a3b8" font-size="18">The key is entered invisibly and will not appear on screen.</text>
+    <text x="70" y="382" fill="#94a3b8" font-size="18">If saved, it stays only in your local .env file, which Git ignores.</text>
+
+    <text x="70" y="444" fill="#60a5fa" font-size="20">OpenRouter API key:</text>
+    <text x="338" y="444" fill="#64748b" font-size="20">••••••••••••••••••••••••••</text>
+
+    <text x="70" y="495" fill="#f8fafc" font-size="19">Save this key locally for future sessions? [Y/n]: y</text>
+    <text x="70" y="542" fill="#4ade80" font-size="19">✓ Configuration saved securely to .env.</text>
+  </g>
+</svg>
