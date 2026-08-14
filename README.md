@@ -11,37 +11,60 @@
 
 </div>
 
+## Interface
+
+The terminal UI uses adaptive-width horizontal rules instead of fragile box corners, so the layout remains aligned across terminals and font configurations.
+
 ![AI Coding Agent terminal interface](docs/assets/terminal-preview.svg)
+
+## First-run setup
+
+No manual `.env` editing is required for a new user. If the OpenRouter key is missing, the application launches a secure setup wizard automatically.
+
+![AI Coding Agent first-run setup](docs/assets/setup-wizard.svg)
+
+The API key is entered with hidden terminal input. The user can either save it locally to the Git-ignored `.env` file or use it for only the current session.
+
+To update the key later, use either:
+
+```bash
+uv run main.py --configure
+```
+
+or, from inside the interactive agent:
+
+```text
+/configure
+```
 
 ## Overview
 
-AI Coding Agent is a Python command-line development agent built around
-an iterative **LLM → tool → result → LLM** feedback loop.
+AI Coding Agent is a Python command-line development agent built around an iterative **LLM → tool → result → LLM** feedback loop.
 
-Instead of producing a single answer and stopping, the agent can inspect
-a codebase, read files, execute Python programs, write changes, observe
-the results, and continue working until it has enough information to
-return a final response.
+Instead of producing a single answer and stopping, the agent can inspect a codebase, read files, execute Python programs, write changes, observe results, and continue working until it has enough information to return a final response.
 
-The original implementation was created during the Boot.dev AI Agent
-curriculum and has since been extended into a cleaner standalone project.
+The project began during the Boot.dev AI Agent curriculum and has been extended into a cleaner standalone application with guided setup, a persistent interactive shell, safety limits, and expanded documentation.
 
-## Key Features
+## Key features
 
 | Feature | Description |
 |---|---|
 | Autonomous agent loop | Continues reasoning and using tools until the task is complete |
+| Guided first-run setup | Prompts securely for an OpenRouter API key when configuration is missing |
+| Hidden credential entry | Prevents the API key from being echoed to the terminal |
+| In-app reconfiguration | `/configure` updates the API key without leaving the agent |
+| Adaptive terminal UI | Uses terminal-aware widths and straight horizontal rules for consistent alignment |
 | File inspection | Lists project directories and discovers relevant source files |
 | Source reading | Reads code before making changes |
 | File editing | Writes fixes and new code into the working directory |
 | Python execution | Runs scripts and uses their output as feedback |
 | Conversation memory | Preserves assistant turns and tool results across reasoning cycles |
 | Interactive shell | Supports persistent conversational coding sessions |
-| CLI mode | Executes a single coding request directly from the terminal |
+| Single-request CLI | Executes a coding request directly from the terminal |
 | Tool visibility | Displays tool calls as they happen |
 | Safety limits | Caps reasoning cycles and model output tokens |
-| Secret handling | Loads API credentials from `.env` rather than source code |
 | Friendly errors | Provides clearer messages for authentication, credits, rate limits, and unavailable models |
+| Secret isolation | Keeps credentials outside source code and Git |
 
 ## Architecture
 
@@ -50,7 +73,7 @@ curriculum and has since been extended into a cleaner standalone project.
 The central loop is:
 
 1. Receive a user request.
-2. Send the conversation and tool definitions to the LLM.
+2. Send conversation history and tool definitions to the LLM.
 3. Append the complete assistant response to conversation history.
 4. Execute each requested tool.
 5. Append each tool result using its matching `tool_call_id`.
@@ -59,7 +82,7 @@ The central loop is:
 
 See [Architecture](docs/ARCHITECTURE.md) for more detail.
 
-## Included Tools
+## Included tools
 
 The agent currently exposes tools for:
 
@@ -68,8 +91,7 @@ The agent currently exposes tools for:
 - writing project files
 - executing Python files
 
-These tools give the model a controlled way to inspect and operate on a
-local project.
+These tools give the model a controlled way to inspect and operate on a local project.
 
 ## Installation
 
@@ -86,27 +108,15 @@ cd ai-chatbot-python
 uv sync
 ```
 
-### 3. Configure your API key
+### 3. Start the agent
 
 ```bash
-cp .env.example .env
+uv run main.py
 ```
 
-Edit `.env`:
-
-```text
-OPENROUTER_API_KEY=your_key_here
-```
-
-Your actual `.env` file is excluded from Git.
+If no OpenRouter key is configured, the setup wizard asks for it securely and offers to save it locally.
 
 ## Usage
-
-### Single request
-
-```bash
-uv run main.py "explain how the calculator renders results to the console"
-```
 
 ### Interactive mode
 
@@ -117,14 +127,24 @@ uv run main.py
 Example:
 
 ```text
-agent › explain the calculator project
-  → Calling function: get_files_info
-  → Calling function: get_file_content
+────────────────────────────────────────────────────────────────────
+                           AI CODING AGENT
+                    Inspect • Modify • Test • Verify
+────────────────────────────────────────────────────────────────────
 
-◆ Completed
-──────────────────────────────────────────────────────────
-The calculator parses the expression...
-──────────────────────────────────────────────────────────
+  MODEL      google/gemini-2.5-flash
+  COMMANDS   /help  /status  /tools  /configure
+             /reset /clear   /quit
+
+────────────────────────────────────────────────────────────────────
+
+agent › explain how the calculator works
+```
+
+### Single request
+
+```bash
+uv run main.py "explain how the calculator renders results to the console"
 ```
 
 ### Verbose mode
@@ -148,45 +168,19 @@ uv run main.py \
   "inspect the calculator"
 ```
 
-## Interactive Commands
+## Interactive commands
 
 | Command | Purpose |
 |---|---|
 | `/help` | Show help and example prompts |
 | `/status` | Display active model and session limits |
 | `/tools` | List tools available to the agent |
+| `/configure` | Securely update the OpenRouter API key |
 | `/reset` | Clear conversation history |
 | `/clear` | Clear the terminal |
 | `/quit` | Exit the application |
 
-## Example Coding Workflow
-
-```text
-User
-  │
-  ▼
-"Fix the calculator bug"
-  │
-  ▼
-get_files_info
-  │
-  ▼
-get_file_content
-  │
-  ▼
-write_file
-  │
-  ▼
-run_python_file
-  │
-  ▼
-Test result
-  │
-  ▼
-Final response
-```
-
-## Project Structure
+## Project structure
 
 ```text
 .
@@ -205,6 +199,9 @@ Final response
 │   ├── FEATURES.md
 │   ├── USAGE.md
 │   └── assets/
+│       ├── agent-loop.svg
+│       ├── setup-wizard.svg
+│       └── terminal-preview.svg
 ├── SECURITY.md
 ├── CONTRIBUTING.md
 └── README.md
@@ -223,23 +220,23 @@ Final response
 
 This is an educational coding agent and should be treated accordingly.
 
-The repository does **not** contain an API key. Credentials belong in
-your local `.env` file.
+The repository does **not** contain an API key. Credentials belong in the local `.env` file or can be supplied for a single session without being saved.
 
-Do not give an autonomous agent access to sensitive directories,
-credentials, production systems, or files it does not need.
+Do not give an autonomous agent access to sensitive directories, credentials, production systems, or files it does not need.
 
 ## Origins
 
-The project began as part of the **Boot.dev AI Agent** course and was
-extended with:
+The project began as part of the **Boot.dev AI Agent** course and was extended with:
 
 - persistent interactive sessions
-- professional CLI presentation
+- guided first-run configuration
+- hidden API-key entry
+- in-app `/configure`
+- adaptive professional terminal presentation
 - configurable models and limits
 - clearer runtime errors
 - richer documentation
-- architecture diagrams
+- architecture and UI diagrams
 - safer secret handling
 
 ## License
