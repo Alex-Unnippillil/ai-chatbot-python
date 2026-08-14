@@ -1,5 +1,7 @@
 import argparse
+from getpass import getpass
 import os
+from pathlib import Path
 import sys
 import time
 
@@ -9,63 +11,30 @@ from openai import OpenAI
 from call_function import available_functions, call_function
 
 
-load_dotenv()
-
 APP_NAME = "AI Coding Agent"
-VERSION = "1.0.0"
-
-DEFAULT_MODEL = os.getenv(
-    "AI_AGENT_MODEL",
-    "google/gemini-2.5-flash",
-)
-
-DEFAULT_MAX_ITERATIONS = int(
-    os.getenv("AI_AGENT_MAX_ITERATIONS", "20")
-)
-
-DEFAULT_MAX_TOKENS = int(
-    os.getenv("AI_AGENT_MAX_TOKENS", "4096")
-)
+VERSION = "1.1.0"
+DEFAULT_MODEL = "google/gemini-2.5-flash"
+DEFAULT_MAX_ITERATIONS = 20
+DEFAULT_MAX_TOKENS = 4096
 
 SYSTEM_PROMPT = """
 You are a professional autonomous coding agent.
 
-Your purpose is to inspect, understand, modify, test, and explain
-software projects using the tools available to you.
-
-Operating rules:
-
-1. Inspect relevant files before editing them.
-2. Never invent file contents.
-3. Prefer small, maintainable changes.
-4. Use tools when filesystem or runtime information is required.
-5. Test changes after modifying code.
-6. If a test fails, investigate and continue.
-7. Continue until the user's requested task is actually complete.
-8. Never reveal API keys, passwords, tokens, private keys,
-   environment-variable values, or credentials.
-9. Never write secrets into project source code.
-10. Summarize the work clearly when finished.
-
-Prefer verification over assumption.
+Use the available tools to inspect, understand, modify, test, and explain
+software projects. Inspect relevant files before changing them, make focused
+changes, verify your work, and continue until the user's task is complete.
+Never reveal or write API keys, passwords, tokens, private keys, credentials,
+or environment-variable values into source files.
 """.strip()
 
 
-# ============================================================
-# Terminal presentation
-# ============================================================
-
 def colors_enabled() -> bool:
-    return (
-        sys.stdout.isatty()
-        and not os.getenv("NO_COLOR")
-    )
+    return sys.stdout.isatty() and not os.getenv("NO_COLOR")
 
 
 def style(text: str, code: str) -> str:
     if not colors_enabled():
         return text
-
     return f"\033[{code}m{text}\033[0m"
 
 
@@ -93,8 +62,16 @@ def dim(text: str) -> str:
     return style(text, "2")
 
 
-def line() -> None:
-    print(dim("─" * 58))
+def success(text: str) -> None:
+    print(green(f"✓ {text}"))
+
+
+def warning(text: str) -> None:
+    print(yellow(f"! {text}"))
+
+
+def failure(text: str) -> None:
+    print(red(f"✗ {text}"), file=sys.stderr)
 
 
 def banner(model: str) -> None:
@@ -109,125 +86,146 @@ def banner(model: str) -> None:
     print()
 
 
-def success(text: str) -> None:
-    print(green(f"✓ {text}"))
+def load_runtime_config() -> None:
+    load_dotenv()
 
 
-def info(text: str) -> None:
-    print(cyan(text))
+def env_value(name: str, default: str) -> str:
+    return os.getenv(name, default)
 
 
-def warning(text: str) -> None:
-    print(yellow(f"! {text}"))
+def save_api_key(api_key: str) -> None:
+    """Save the API key to the local .env file without exposing it."""
+    env_path = Path(".env")
+    lines = []
+
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+
+    updated = []
+    found_key = False
+
+    for line in lines:
+        if line.startswith("OPENROUTER_API_KEY="):
+            updated.append(f"OPENROUTER_API_KEY={api_key}")
+            found_key = True
+        else:
+            updated.append(line)
+
+    if not found_key:
+        if updated and updated[-1].strip():
+            updated.append("")
+        updated.append(f"OPENROUTER_API_KEY={api_key}")
+
+    defaults = {
+        "AI_AGENT_MODEL": DEFAULT_MODEL,
+        "AI_AGENT_MAX_ITERATIONS": str(DEFAULT_MAX_ITERATIONS),
+        "AI_AGENT_MAX_TOKENS": str(DEFAULT_MAX_TOKENS),
+        "OPENROUTER_BASE_URL": "https://openrouter.ai/api/v1",
+    }
+
+    existing_names = {
+        line.split("=", 1)[0]
+        for line in updated
+        if "=" in line and not line.lstrip().startswith("#")
+    }
+
+    for name, value in defaults.items():
+        if name not in existing_names:
+            updated.append(f"{name}={value}")
+
+    env_path.write_text("\n".join(updated).rstrip() + "\n", encoding="utf-8")
+
+    try:
+        env_path.chmod(0o600)
+    except OSError:
+        pass
 
 
-def failure(text: str) -> None:
-    print(red(f"✗ {text}"), file=sys.stderr)
+def setup_wizard(force: bool = False) -> str:
+    """Ask for an OpenRouter API key when none is configured."""
+    load_runtime_config()
+    current = os.getenv("OPENROUTER_API_KEY", "").strip()
 
+    if current and current != "replace_with_your_own_key" and not force:
+        return current
 
-# ============================================================
-# Client
-# ============================================================
-
-def create_client() -> OpenAI:
-    api_key = os.getenv("OPENROUTER_API_KEY")
-
-    if not api_key or api_key == "replace_with_your_own_key":
+    if not sys.stdin.isatty():
         raise RuntimeError(
-            "OpenRouter is not configured.\n\n"
-            "Create or edit .env and add:\n"
-            "OPENROUTER_API_KEY=your_actual_key"
+            "OPENROUTER_API_KEY is required. Set it in the environment or a local .env file."
         )
 
+    print()
+    print(cyan("╭────────────────────────────────────────────────────────╮"))
+    print(cyan("│") + bold("                FIRST-TIME SETUP") + " " * 20 + cyan("│"))
+    print(cyan("╰────────────────────────────────────────────────────────╯"))
+    print()
+    print("No OpenRouter API key is configured." if not current else "Update your OpenRouter API key.")
+    print()
+    print("The key is entered invisibly, so it will not appear on screen.")
+    print("You can save it locally to .env, which is ignored by Git.")
+    print()
+
+    while True:
+        api_key = getpass("OpenRouter API key: ").strip()
+        if api_key and api_key != "replace_with_your_own_key":
+            break
+        warning("Enter a valid API key, not the example placeholder.")
+
+    print()
+    choice = input("Save this key locally for future sessions? [Y/n]: ").strip().lower()
+
+    if choice not in {"n", "no"}:
+        save_api_key(api_key)
+        success("Configuration saved securely to .env.")
+    else:
+        success("Using the key for this session only.")
+
+    os.environ["OPENROUTER_API_KEY"] = api_key
+    print()
+    return api_key
+
+
+def create_client(force_configure: bool = False) -> OpenAI:
+    load_runtime_config()
+    api_key = setup_wizard(force=force_configure)
+
     return OpenAI(
-        base_url=os.getenv(
-            "OPENROUTER_BASE_URL",
-            "https://openrouter.ai/api/v1",
-        ),
+        base_url=env_value("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
         api_key=api_key,
     )
 
 
 def new_history():
-    return [
-        {
-            "role": "system",
-            "content": SYSTEM_PROMPT,
-        }
-    ]
+    return [{"role": "system", "content": SYSTEM_PROMPT}]
 
-
-# ============================================================
-# Error presentation
-# ============================================================
 
 def friendly_api_error(exc: Exception) -> str:
     message = str(exc)
 
     if "401" in message or "Authentication" in message:
-        return (
-            "Authentication failed. Check OPENROUTER_API_KEY "
-            "in your local .env file."
-        )
-
+        return "Authentication failed. Run `uv run main.py --configure` and enter a valid OpenRouter key."
     if "402" in message or "credits" in message.lower():
-        return (
-            "The provider rejected the request because of account "
-            "credit or token-limit restrictions."
-        )
-
+        return "The provider rejected the request because of account credit or token-limit restrictions."
     if "404" in message or "No endpoints found" in message:
-        return (
-            "The configured model is currently unavailable. "
-            "Choose another model with --model or AI_AGENT_MODEL."
-        )
-
+        return "The configured model is unavailable. Choose another model with --model."
     if "429" in message:
-        return (
-            "The provider rate limit was reached. "
-            "Wait briefly and try again."
-        )
-
+        return "The provider rate limit was reached. Wait briefly and try again."
     return f"Agent request failed: {message}"
 
 
-# ============================================================
-# Agent loop
-# ============================================================
-
-def run_agent_turn(
-    client,
-    messages,
-    prompt,
-    model,
-    verbose,
-    max_iterations,
-    max_tokens,
-) -> bool:
-
-    messages.append(
-        {
-            "role": "user",
-            "content": prompt,
-        }
-    )
-
+def run_agent_turn(client, messages, prompt, model, verbose, max_iterations, max_tokens) -> bool:
+    messages.append({"role": "user", "content": prompt})
     started = time.perf_counter()
     tool_count = 0
 
     print()
-    info("◆ Working on request")
-    line()
+    print(cyan("◆ Working on request"))
+    print(dim("─" * 58))
 
     for iteration in range(1, max_iterations + 1):
-
         if verbose:
-            print(
-                dim(
-                    f"  reasoning cycle "
-                    f"{iteration}/{max_iterations}"
-                )
-            )
+            print(dim(f"  reasoning cycle {iteration}/{max_iterations}"))
 
         response = client.chat.completions.create(
             model=model,
@@ -237,131 +235,67 @@ def run_agent_turn(
         )
 
         message = response.choices[0].message
-
-        # Critical agent-loop behavior:
-        # preserve the assistant turn before tool results.
         messages.append(message)
 
         if not message.tool_calls:
             elapsed = time.perf_counter() - started
-
             print()
             print(green("◆ Completed"))
-            line()
+            print(dim("─" * 58))
             print(message.content or "(No response text returned.)")
-            line()
-            print(
-                dim(
-                    f"{tool_count} tool call(s) • "
-                    f"{elapsed:.1f}s"
-                )
-            )
+            print(dim("─" * 58))
+            print(dim(f"{tool_count} tool call(s) • {elapsed:.1f}s"))
             print()
-
             return True
 
         for tool_call in message.tool_calls:
             tool_count += 1
             name = tool_call.function.name
-
-            # Preserve Boot.dev-friendly function-name output.
-            info(f"  → Calling function: {name}")
-
-            result_message = call_function(
-                tool_call,
-                verbose=verbose,
-            )
-
+            print(cyan(f"  → Calling function: {name}"))
+            result_message = call_function(tool_call, verbose=verbose)
             messages.append(result_message)
 
-    failure(
-        f"Stopped after {max_iterations} reasoning cycles "
-        "without receiving a final response."
-    )
-
+    failure(f"Stopped after {max_iterations} reasoning cycles without a final response.")
     return False
 
 
-# ============================================================
-# Interactive commands
-# ============================================================
-
-def show_help() -> None:
-    print()
-    print(bold("Commands"))
-    print()
-    print("  /help      Show command help")
-    print("  /status    Show current session configuration")
-    print("  /tools     Show available coding tools")
-    print("  /reset     Clear conversation history")
-    print("  /clear     Clear the terminal")
-    print("  /quit      Exit")
-    print()
-    print(bold("Example tasks"))
-    print()
-    print("  Explain how the calculator works")
-    print("  Find the bug in the calculator and test the fix")
-    print("  Inspect the Python project and summarize its architecture")
-    print("  Run the calculator and investigate any errors")
-    print()
-
-
-def show_tools() -> None:
-    print()
-    print(bold("Available tools"))
-    print()
-
+def tool_names():
     names = []
-
     for tool in available_functions:
         try:
             names.append(tool["function"]["name"])
         except (KeyError, TypeError):
-            names.append(str(tool))
+            try:
+                names.append(tool.function.name)
+            except AttributeError:
+                names.append(str(tool))
+    return names
 
-    for name in names:
-        print(f"  • {name}")
 
+def show_help() -> None:
+    print()
+    print(bold("Commands"))
+    print("  /help      Show help")
+    print("  /status    Show session configuration")
+    print("  /tools     List available tools")
+    print("  /reset     Clear conversation history")
+    print("  /clear     Clear the terminal")
+    print("  /quit      Exit")
+    print()
+    print(bold("Examples"))
+    print("  Explain how the calculator works")
+    print("  Find the calculator bug, fix it, and run the tests")
+    print("  Inspect this Python project and summarize its architecture")
     print()
 
 
-def show_status(
-    model: str,
-    max_iterations: int,
-    max_tokens: int,
-    messages,
-) -> None:
-
-    print()
-    print(bold("Session status"))
-    print()
-    print(f"  Model             {model}")
-    print(f"  Max iterations    {max_iterations}")
-    print(f"  Max output tokens {max_tokens}")
-    print(f"  Conversation      {max(0, len(messages) - 1)} message(s)")
-    print(f"  Tools             {len(available_functions)}")
-    print()
-
-
-def interactive_mode(
-    client,
-    model,
-    verbose,
-    max_iterations,
-    max_tokens,
-) -> int:
-
+def interactive_mode(client, model, verbose, max_iterations, max_tokens) -> int:
     banner(model)
-
     messages = new_history()
 
     while True:
-
         try:
-            prompt = input(
-                style("agent › ", "1;34")
-            ).strip()
-
+            prompt = input(style("agent › ", "1;34")).strip()
         except (KeyboardInterrupt, EOFError):
             print()
             success("Session closed.")
@@ -375,137 +309,86 @@ def interactive_mode(
         if command in {"/quit", "/exit", "quit", "exit"}:
             success("Session closed.")
             return 0
-
         if command == "/help":
             show_help()
             continue
-
         if command == "/status":
-            show_status(
-                model,
-                max_iterations,
-                max_tokens,
-                messages,
-            )
+            print()
+            print(f"  Model             {model}")
+            print(f"  Max iterations    {max_iterations}")
+            print(f"  Max output tokens {max_tokens}")
+            print(f"  Conversation      {max(0, len(messages) - 1)} message(s)")
+            print(f"  Tools             {len(available_functions)}")
+            print()
             continue
-
         if command == "/tools":
-            show_tools()
+            print()
+            for name in tool_names():
+                print(f"  • {name}")
+            print()
             continue
-
         if command == "/reset":
             messages = new_history()
             success("Conversation history cleared.")
             continue
-
         if command == "/clear":
-            os.system(
-                "cls"
-                if os.name == "nt"
-                else "clear"
-            )
+            os.system("cls" if os.name == "nt" else "clear")
             banner(model)
             continue
 
         try:
-            run_agent_turn(
-                client,
-                messages,
-                prompt,
-                model,
-                verbose,
-                max_iterations,
-                max_tokens,
-            )
-
+            run_agent_turn(client, messages, prompt, model, verbose, max_iterations, max_tokens)
         except Exception as exc:
             failure(friendly_api_error(exc))
 
 
-# ============================================================
-# Command-line parsing
-# ============================================================
-
 def parse_args():
     parser = argparse.ArgumentParser(
         prog="ai-agent",
-        description=(
-            "Autonomous coding agent with filesystem, "
-            "editing, and Python execution tools."
-        ),
+        description="Autonomous coding agent with filesystem, editing, and Python execution tools.",
     )
-
-    parser.add_argument(
-        "prompt",
-        nargs="*",
-        help=(
-            "Coding request. Leave blank to launch "
-            "interactive mode."
-        ),
-    )
-
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Show detailed tool execution information.",
-    )
-
-    parser.add_argument(
-        "--model",
-        default=DEFAULT_MODEL,
-        help=f"Model name (default: {DEFAULT_MODEL})",
-    )
-
-    parser.add_argument(
-        "--max-iterations",
-        type=int,
-        default=DEFAULT_MAX_ITERATIONS,
-        help=(
-            "Maximum agent reasoning cycles "
-            f"(default: {DEFAULT_MAX_ITERATIONS})"
-        ),
-    )
-
-    parser.add_argument(
-        "--max-tokens",
-        type=int,
-        default=DEFAULT_MAX_TOKENS,
-        help=(
-            "Maximum model output tokens "
-            f"(default: {DEFAULT_MAX_TOKENS})"
-        ),
-    )
-
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"{APP_NAME} {VERSION}",
-    )
-
+    parser.add_argument("prompt", nargs="*", help="Coding request. Leave blank for interactive mode.")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Show detailed tool activity.")
+    parser.add_argument("--model", default=None, help="Override the configured OpenRouter model.")
+    parser.add_argument("--max-iterations", type=int, default=None, help="Maximum agent reasoning cycles.")
+    parser.add_argument("--max-tokens", type=int, default=None, help="Maximum model output tokens.")
+    parser.add_argument("--configure", action="store_true", help="Run the secure API-key setup wizard.")
+    parser.add_argument("--version", action="version", version=f"{APP_NAME} {VERSION}")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    load_runtime_config()
+
+    model = args.model or env_value("AI_AGENT_MODEL", DEFAULT_MODEL)
+    max_iterations = args.max_iterations or int(env_value("AI_AGENT_MAX_ITERATIONS", str(DEFAULT_MAX_ITERATIONS)))
+    max_tokens = args.max_tokens or int(env_value("AI_AGENT_MAX_TOKENS", str(DEFAULT_MAX_TOKENS)))
+
+    if args.configure:
+        try:
+            setup_wizard(force=True)
+            success("Setup complete. Run `uv run main.py` to start the agent.")
+            return 0
+        except (KeyboardInterrupt, EOFError):
+            print()
+            warning("Setup cancelled.")
+            return 1
 
     try:
         client = create_client()
-
-    except RuntimeError as exc:
-        failure(str(exc))
+    except (RuntimeError, KeyboardInterrupt, EOFError) as exc:
+        if isinstance(exc, RuntimeError):
+            failure(str(exc))
+        else:
+            print()
+            warning("Setup cancelled.")
         return 1
 
     prompt = " ".join(args.prompt).strip()
 
     if not prompt:
-        return interactive_mode(
-            client,
-            args.model,
-            args.verbose,
-            args.max_iterations,
-            args.max_tokens,
-        )
+        return interactive_mode(client, model, args.verbose, max_iterations, max_tokens)
 
     messages = new_history()
 
@@ -514,14 +397,12 @@ def main() -> int:
             client,
             messages,
             prompt,
-            args.model,
+            model,
             args.verbose,
-            args.max_iterations,
-            args.max_tokens,
+            max_iterations,
+            max_tokens,
         )
-
         return 0 if completed else 1
-
     except Exception as exc:
         failure(friendly_api_error(exc))
         return 1
