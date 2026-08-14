@@ -1,12 +1,31 @@
-# Python-generated files
+# Credentials
+.env
+.env.*
+!.env.example
+secure/
+secrets/
+credentials*
+*.pem
+*.key
+
+# Python
+.venv/
+venv/
 __pycache__/
-*.py[oc]
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local/editor
+.vscode/
+.idea/
+.DS_Store
+
+# Backups / logs / builds
+*.bak
+*.backup
+*.log
 build/
 dist/
-wheels/
-*.egg-info
-
-# Virtual environments
-.venv
-.venv/
-.env
+*.egg-info/
