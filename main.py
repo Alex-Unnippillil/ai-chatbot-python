@@ -2,6 +2,7 @@ import argparse
 from getpass import getpass
 import os
 from pathlib import Path
+import shutil
 import sys
 import time
 
@@ -12,7 +13,7 @@ from call_function import available_functions, call_function
 
 
 APP_NAME = "AI Coding Agent"
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 DEFAULT_MODEL = "google/gemini-2.5-flash"
 DEFAULT_MAX_ITERATIONS = 20
 DEFAULT_MAX_TOKENS = 4096
@@ -27,6 +28,10 @@ Never reveal or write API keys, passwords, tokens, private keys, credentials,
 or environment-variable values into source files.
 """.strip()
 
+
+# -----------------------------------------------------------------------------
+# Terminal UI
+# -----------------------------------------------------------------------------
 
 def colors_enabled() -> bool:
     return sys.stdout.isatty() and not os.getenv("NO_COLOR")
@@ -62,6 +67,34 @@ def dim(text: str) -> str:
     return style(text, "2")
 
 
+def terminal_width() -> int:
+    """Return a stable UI width that still works on narrower terminals."""
+    columns = shutil.get_terminal_size(fallback=(72, 24)).columns
+    return max(56, min(columns - 2, 78))
+
+
+def rule(color_fn=dim) -> None:
+    print(color_fn("─" * terminal_width()))
+
+
+def centered(text: str) -> str:
+    return text.center(terminal_width())
+
+
+def header(title: str, subtitle: str | None = None) -> None:
+    """Render a clean header without fragile box-drawing corners."""
+    print()
+    rule(cyan)
+    print(bold(centered(title)))
+    if subtitle:
+        print(dim(centered(subtitle)))
+    rule(cyan)
+
+
+def status_row(label: str, value: str) -> None:
+    print(f"  {dim(label.upper().ljust(11))}{value}")
+
+
 def success(text: str) -> None:
     print(green(f"✓ {text}"))
 
@@ -75,16 +108,19 @@ def failure(text: str) -> None:
 
 
 def banner(model: str) -> None:
+    header(APP_NAME.upper(), "Inspect • Modify • Test • Verify")
     print()
-    print(cyan("╭────────────────────────────────────────────────────────╮"))
-    print(cyan("│") + bold("                   AI CODING AGENT") + " " * 19 + cyan("│"))
-    print(cyan("│") + "          Inspect • Modify • Test • Verify" + " " * 12 + cyan("│"))
-    print(cyan("╰────────────────────────────────────────────────────────╯"))
+    status_row("Model", model)
+    status_row("Commands", "/help  /status  /tools  /configure")
+    status_row("", "/reset /clear   /quit")
     print()
-    print(f"  {dim('Model')}     {model}")
-    print(f"  {dim('Commands')}  /help  /status  /tools  /reset  /clear  /quit")
+    rule()
     print()
 
+
+# -----------------------------------------------------------------------------
+# Configuration
+# -----------------------------------------------------------------------------
 
 def load_runtime_config() -> None:
     load_dotenv()
@@ -155,15 +191,12 @@ def setup_wizard(force: bool = False) -> str:
             "OPENROUTER_API_KEY is required. Set it in the environment or a local .env file."
         )
 
-    print()
-    print(cyan("╭────────────────────────────────────────────────────────╮"))
-    print(cyan("│") + bold("                FIRST-TIME SETUP") + " " * 20 + cyan("│"))
-    print(cyan("╰────────────────────────────────────────────────────────╯"))
+    header("FIRST-TIME SETUP", "Secure OpenRouter configuration")
     print()
     print("No OpenRouter API key is configured." if not current else "Update your OpenRouter API key.")
     print()
-    print("The key is entered invisibly, so it will not appear on screen.")
-    print("You can save it locally to .env, which is ignored by Git.")
+    print("The key is entered invisibly and will not appear on screen.")
+    print("If saved, it stays only in your local .env file, which Git ignores.")
     print()
 
     while True:
@@ -196,6 +229,10 @@ def create_client(force_configure: bool = False) -> OpenAI:
     )
 
 
+# -----------------------------------------------------------------------------
+# Agent loop
+# -----------------------------------------------------------------------------
+
 def new_history():
     return [{"role": "system", "content": SYSTEM_PROMPT}]
 
@@ -204,7 +241,7 @@ def friendly_api_error(exc: Exception) -> str:
     message = str(exc)
 
     if "401" in message or "Authentication" in message:
-        return "Authentication failed. Run `uv run main.py --configure` and enter a valid OpenRouter key."
+        return "Authentication failed. Use /configure or run `uv run main.py --configure`."
     if "402" in message or "credits" in message.lower():
         return "The provider rejected the request because of account credit or token-limit restrictions."
     if "404" in message or "No endpoints found" in message:
@@ -220,12 +257,12 @@ def run_agent_turn(client, messages, prompt, model, verbose, max_iterations, max
     tool_count = 0
 
     print()
-    print(cyan("◆ Working on request"))
-    print(dim("─" * 58))
+    print(cyan("WORKING"))
+    rule()
 
     for iteration in range(1, max_iterations + 1):
         if verbose:
-            print(dim(f"  reasoning cycle {iteration}/{max_iterations}"))
+            print(dim(f"cycle {iteration}/{max_iterations}"))
 
         response = client.chat.completions.create(
             model=model,
@@ -240,10 +277,10 @@ def run_agent_turn(client, messages, prompt, model, verbose, max_iterations, max
         if not message.tool_calls:
             elapsed = time.perf_counter() - started
             print()
-            print(green("◆ Completed"))
-            print(dim("─" * 58))
+            print(green("COMPLETED"))
+            rule()
             print(message.content or "(No response text returned.)")
-            print(dim("─" * 58))
+            rule()
             print(dim(f"{tool_count} tool call(s) • {elapsed:.1f}s"))
             print()
             return True
@@ -251,7 +288,7 @@ def run_agent_turn(client, messages, prompt, model, verbose, max_iterations, max
         for tool_call in message.tool_calls:
             tool_count += 1
             name = tool_call.function.name
-            print(cyan(f"  → Calling function: {name}"))
+            print(cyan(f"→ {name}"))
             result_message = call_function(tool_call, verbose=verbose)
             messages.append(result_message)
 
@@ -272,15 +309,21 @@ def tool_names():
     return names
 
 
+# -----------------------------------------------------------------------------
+# Interactive mode
+# -----------------------------------------------------------------------------
+
 def show_help() -> None:
+    header("HELP")
     print()
     print(bold("Commands"))
-    print("  /help      Show help")
-    print("  /status    Show session configuration")
-    print("  /tools     List available tools")
-    print("  /reset     Clear conversation history")
-    print("  /clear     Clear the terminal")
-    print("  /quit      Exit")
+    print("  /help        Show help")
+    print("  /status      Show session configuration")
+    print("  /tools       List available tools")
+    print("  /configure   Update the OpenRouter API key")
+    print("  /reset       Clear conversation history")
+    print("  /clear       Clear the terminal")
+    print("  /quit        Exit")
     print()
     print(bold("Examples"))
     print("  Explain how the calculator works")
@@ -313,19 +356,30 @@ def interactive_mode(client, model, verbose, max_iterations, max_tokens) -> int:
             show_help()
             continue
         if command == "/status":
+            header("SESSION STATUS")
             print()
-            print(f"  Model             {model}")
-            print(f"  Max iterations    {max_iterations}")
-            print(f"  Max output tokens {max_tokens}")
-            print(f"  Conversation      {max(0, len(messages) - 1)} message(s)")
-            print(f"  Tools             {len(available_functions)}")
+            status_row("Model", model)
+            status_row("Iterations", str(max_iterations))
+            status_row("Max tokens", str(max_tokens))
+            status_row("Messages", str(max(0, len(messages) - 1)))
+            status_row("Tools", str(len(available_functions)))
             print()
             continue
         if command == "/tools":
+            header("AVAILABLE TOOLS")
             print()
             for name in tool_names():
                 print(f"  • {name}")
             print()
+            continue
+        if command == "/configure":
+            try:
+                setup_wizard(force=True)
+                client = create_client()
+                success("API configuration updated for this session.")
+            except (KeyboardInterrupt, EOFError):
+                print()
+                warning("Configuration cancelled.")
             continue
         if command == "/reset":
             messages = new_history()
@@ -341,6 +395,10 @@ def interactive_mode(client, model, verbose, max_iterations, max_tokens) -> int:
         except Exception as exc:
             failure(friendly_api_error(exc))
 
+
+# -----------------------------------------------------------------------------
+# CLI
+# -----------------------------------------------------------------------------
 
 def parse_args():
     parser = argparse.ArgumentParser(
